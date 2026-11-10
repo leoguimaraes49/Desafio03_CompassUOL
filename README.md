@@ -46,7 +46,7 @@ O arquivo `application.properties` configura a porta `8080` e habilita o console
 
 - O único teste encontrado em `src/test` é `contextLoads`; não há no repositório as classes `PostServiceTests` e `PostControllerIntegrationTest` citadas anteriormente. O comando convencional seria `mvn test`, sujeito às mesmas limitações de build.
 - O `pom.xml` declara `spring-boot-starter-task` e `spring-boot-starter-scheduling` sem versões explícitas. A resolução dessas dependências precisa ser verificada e corrigida para uma construção reproduzível.
-- Na tentativa de executar `mvn test` durante a revisão, a instalação local do Maven falhou antes da leitura do projeto por ausência da configuração de logging do Maven. Portanto, nenhum teste da aplicação foi executado.
+- O build e os testes não foram validados nesta revisão.
 - Apesar de configurar HTTP Basic e credenciais locais, `SecurityConfig` permite todas as requisições e desabilita CSRF. Não exponha essa configuração como autenticação efetiva.
 - O getter de estado de `Post` consulta o histórico, enquanto o serviço atribui diretamente o campo de estado. A coerência dessas transições e o relacionamento dos comentários precisam de testes e correções.
 - A rotina de coleta chama uma API externa, e a persistência em H2 é volátil; falhas de rede e reinicialização afetam o resultado.
