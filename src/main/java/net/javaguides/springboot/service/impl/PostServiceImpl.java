@@ -1,4 +1,3 @@
-
 package net.javaguides.springboot.service.impl;
 
 import net.javaguides.springboot.entity.Comment;
@@ -7,9 +6,13 @@ import net.javaguides.springboot.entity.PostState;
 import net.javaguides.springboot.repository.PostRepository;
 import net.javaguides.springboot.service.ExternalApiClient;
 import net.javaguides.springboot.service.PostService;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.List;
@@ -17,53 +20,50 @@ import java.util.List;
 @Service
 public class PostServiceImpl implements PostService {
 
-    @Autowired
-    private PostRepository postRepository;
+    private static final Logger log = LoggerFactory.getLogger(PostServiceImpl.class);
+    private final PostRepository postRepository;
+    private final ExternalApiClient externalApiClient;
 
-    @Autowired
-    private ExternalApiClient externalApiClient;
+    public PostServiceImpl(PostRepository postRepository, ExternalApiClient externalApiClient) {
+        this.postRepository = postRepository;
+        this.externalApiClient = externalApiClient;
+    }
 
     @Override
+    @Transactional
     public void processPost(Long postId) {
-    try {
-        // Fetch basic post data from external API
         Post post = externalApiClient.fetchPostById(postId);
-        post.setState(PostState.POST_OK);
-        postRepository.save(post);
-
-        // Fetch comments for the post from external API
         Comment[] comments = externalApiClient.fetchCommentsByPostId(postId);
+        if (post == null || comments == null || !postId.equals(post.getId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Invalid response from external API");
+        }
+        for (Comment comment : comments) {
+            comment.setPost(post);
+        }
         post.setComments(Arrays.asList(comments));
-        post.setState(PostState.COMMENTS_OK);
-        postRepository.save(post);
-
-        // Enable the post
         post.setState(PostState.ENABLED);
         postRepository.save(post);
-    } catch (Exception e) {
-        // Log the exception
-        System.out.println("Error processing post with ID: " + postId);
-        e.printStackTrace();
-    }
     }
 
     @Override
+    @Transactional
     public void disablePost(Long postId) {
-        Post post = postRepository.findById(postId).orElse(null);
-        if (post != null && post.getState() == PostState.ENABLED) {
-            post.setState(PostState.DISABLED);
-            postRepository.save(post);
+        Post post = findPost(postId);
+        if (post.getState() != PostState.ENABLED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Post is not enabled");
         }
+        post.setState(PostState.DISABLED);
+        postRepository.save(post);
     }
 
     @Override
+    @Transactional
     public void reprocessPost(Long postId) {
-        Post post = postRepository.findById(postId).orElse(null);
-        if (post != null && (post.getState() == PostState.ENABLED || post.getState() == PostState.DISABLED)) {
-            // Here, we can add logic to reprocess the post. For simplicity, I am just updating its state to UPDATING.
-            post.setState(PostState.UPDATING);
-            postRepository.save(post);
+        Post existing = findPost(postId);
+        if (existing.getState() != PostState.ENABLED && existing.getState() != PostState.DISABLED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Post cannot be reprocessed");
         }
+        processPost(postId);
     }
 
     @Override
@@ -71,11 +71,19 @@ public class PostServiceImpl implements PostService {
         return postRepository.findAll();
     }
 
-    @Scheduled(fixedRate = 3600000)  // Every hour
-    public void scheduledFetchPosts() {
-        for (Long i = 1L; i <= 100; i++) {
-            processPost(i);
-        }
+    private Post findPost(Long postId) {
+        return postRepository.findById(postId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Post not found"));
     }
 
+    @Scheduled(fixedRate = 3600000, initialDelay = 3600000)
+    public void scheduledFetchPosts() {
+        for (long id = 1; id <= 100; id++) {
+            try {
+                processPost(id);
+            } catch (RuntimeException ex) {
+                log.warn("Could not process post {}: {}", id, ex.getMessage());
+            }
+        }
+    }
 }
